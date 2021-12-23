@@ -1,0 +1,122 @@
+---
+title: "rfinal"
+output: pdf_document
+---
+
+```{r, message = FALSE}
+library(tidyverse)
+library(dplyr)
+library(boot)
+library(aod)
+library(ggplot2)
+#card <- read.csv("/Users/srinivasansathiamurthy/Desktop/carbontax.csv")
+carbind <- read.csv("/Users/srinivasansathiamurthy/Desktop/carbonprice.csv")
+climate <- read.csv("/Users/srinivasansathiamurthy/Desktop/API_19_DS2_en_csv_v2_3159902.csv")
+econgrowth <- read.csv("/Users/srinivasansathiamurthy/Desktop/API_3_DS2_en_csv_v2_3163364.csv")
+energy <- read.csv("/Users/srinivasansathiamurthy/Desktop/API_5_DS2_en_csv_v2_3161037.csv")
+externdebt <- read.csv("/Users/srinivasansathiamurthy/Desktop/API_20_DS2_en_csv_v2_3163387.csv")
+govtdebt <- read.csv("/Users/srinivasansathiamurthy/Desktop/API_13_DS2_en_csv_v2_3163417.csv")
+urban <- read.csv("/Users/srinivasansathiamurthy/Desktop/API_16_DS2_en_csv_v2_3161141.csv")
+techrnd <- read.csv("/Users/srinivasansathiamurthy/Desktop/API_14_DS2_en_csv_v2_3163423.csv")
+poverty <- read.csv("/Users/srinivasansathiamurthy/Desktop/API_11_DS2_en_csv_v2_3159271.csv")
+trade <- read.csv("/Users/srinivasansathiamurthy/Desktop/API_21_DS2_en_csv_v2_3163432.csv")
+labor <- read.csv("/Users/srinivasansathiamurthy/Desktop/API_10_DS2_en_csv_v2_3163427.csv")
+```
+
+## R Markdown
+
+control for country dummies
+- we have time varied 
+we can include country specific variables (whether or not it is that country or not)
+so in each data point "is this iran or not, is this afghanistan or not"
+use the plm package for that
+main_slides_rs05_practice
+daily_notes_rs14_nov22
+
+just pick the variables you really care about
+think about your punch line
+- figure out which variables matter and which don't (use t-statistic on multilinear regression)
+
+meet again on wednesday with prof kang
+
+logistic model no neural network (not enough data)
+
+```{r}
+##########################################################################only use data from 2010 to 2017
+climate_C02kt<- climate[climate$Indicator.Name=="CO2 emissions (kt)",]
+climate_renewpercent<- climate[climate$Indicator.Name=="Renewable energy consumption (% of total final energy consumption)",]
+econind_gdpcap <- econgrowth[econgrowth$Indicator.Name=="GDP per capita (current US$)",]
+urban_airpolpop <- urban[urban$Indicator.Name=="PM2.5 air pollution, population exposed to levels exceeding WHO guideline value (% of total)",]
+urban_pop<- urban[urban$Indicator.Name=="Urban population (% of total population)",]
+trade_fuelimport <- trade[trade$Indicator.Name=="Fuel imports (% of merchandise imports)",]
+trade_fuelexport <- trade[trade$Indicator.Name=="Fuel exports (% of merchandise exports)",]
+labor_emp <- labor[labor$Indicator.Name=="Unemployment, total (% of total labor force) (modeled ILO estimate)",]
+
+#maybe do some underlying testing on these countries to see biases and stuff?
+nacountryvec = unique(c(econind_gdpcap$Country.Name[is.na(econind_gdpcap$X2018)], urban_airpolpop$Country.Name[is.na(urban_airpolpop$X2010)], urban_pop$Country.Name[is.na(urban_pop$X2014)], trade_fuelimport$Country.Name[is.na(trade_fuelimport$X2017)], trade_fuelimport$Country.Name[is.na(trade_fuelimport$X2012)], trade_fuelimport$Country.Name[is.na(trade_fuelimport$X2015)], trade_fuelimport$Country.Name[is.na(trade_fuelimport$X2013)], trade_fuelimport$Country.Name[is.na(trade_fuelimport$X2011)], trade_fuelimport$Country.Name[is.na(trade_fuelimport$X2010)], trade_fuelexport$Country.Name[is.na(trade_fuelexport$X2017)], trade_fuelexport$Country.Name[is.na(trade_fuelexport$X2012)], trade_fuelexport$Country.Name[is.na(trade_fuelexport$X2015)], trade_fuelexport$Country.Name[is.na(trade_fuelexport$X2013)], trade_fuelexport$Country.Name[is.na(trade_fuelexport$X2011)], trade_fuelexport$Country.Name[is.na(trade_fuelexport$X2010)], labor_emp$Country.Name[is.na(labor_emp$X2010)], labor_emp$Country.Name[is.na(labor_emp$X2017)]))
+carbind2 <- carbind[ ! carbind$Country.Name %in% nacountryvec, ]
+carbind2 <- subset(carbind2, select = -c(X, X1990, X1991, X1992, X1993, X1994, X1995, X1996, X1997, X1998, X1999, X2000, X2001, X2002, X2003, X2004, X2005, X2006, X2007, X2008, X2009, X2018, X2019, X2020, X2021))
+carbind2 <- carbind2[!(carbind2$Country.Name=="Bahamas"| carbind2$Country.Name=="Gambia" | carbind2$Country.Name=="Hong Kong"),] 
+
+ind <- vector()
+C02ktvec <- vector()
+renewpercentvec <- vector()
+gdpcap <- vector()
+airpolpop <- vector()
+pop <- vector()
+fuelimport <- vector()
+fuelexport <- vector()
+emp <- vector()
+name <- vector()
+
+for(j in 1:129){
+  for(i in 55:62){  
+    ind <- c(ind, carbind2[j, i-52])
+    C02ktvec <- c(C02ktvec, log(climate_C02kt[climate_C02kt$Country.Name== carbind2[j, 1], i]))
+    renewpercentvec<- c(renewpercentvec, climate_renewpercent[climate_renewpercent$Country.Name== carbind2[j, 1], i])
+    gdpcap <- c(gdpcap, log(econind_gdpcap[econind_gdpcap$Country.Name== carbind2[j, 1], i]))
+    airpolpop <-c(airpolpop, urban_airpolpop[urban_airpolpop$Country.Name== carbind2[j, 1], i])
+    pop <- c(pop, log(urban_pop[urban_pop$Country.Name== carbind2[j, 1], i]))
+    fuelimport <-c(fuelimport, trade_fuelimport[trade_fuelimport$Country.Name== carbind2[j, 1], i])
+    fuelexport <- c(fuelexport, trade_fuelexport[trade_fuelexport$Country.Name== carbind2[j, 1], i])
+    emp<- c(emp, labor_emp[labor_emp$Country.Name== carbind2[j, 1], i])
+  }
+}
+
+logitdata<- data.frame(ind, C02ktvec, renewpercentvec, gdpcap, airpolpop,pop,  fuelimport, fuelexport, emp)
+logitdata
+
+wt<- vector()
+for(i in 1:1032){
+  wt<- append(wt, 6.478*(1-logitdata$ind[i])+1)
+}
+logitdata$wt = wt
+##emp, fuelimport, renewpercentvec coefficients ended up not being statistically significant and are pretty much irrelevant magnitude wise as well
+mylogit <- glm(ind ~ C02ktvec + gdpcap+airpolpop+fuelexport, weights=wt, data = logitdata, family = binomial)
+summary(mylogit)
+exp(coef(mylogit))
+
+mylogit2 <- glm(ind ~ C02ktvec + gdpcap+airpolpop+fuelexport+emp+fuelimport+renewpercentvec, weights=wt, data = logitdata, family = binomial)
+summary(mylogit2)
+exp(coef(mylogit2))
+
+```
+
+dealing with reverse causality:
+thinking energy usage is affecting carbon tax or vice versa
+lag value: carbon tax policy this year is affected by predictors of last year (how to do this?)
+- create a vector: 
+given country sort it chronologically
+
+(done)
+don't need to worry too much about including variables that are statistically significant
+not that concerned about fitting
+we want to include more variables in the regression to take care of counfounding vector!! (put everything in)
+
+(need to do)
+potential different specifications:
+- linear regression also good
+- show linear too! (same specifications) [include fixed effects]
+  - **country dummy variables and year dummy variables**
+  
+  year as x axis and carbon tax as y axis
